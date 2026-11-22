@@ -1,10 +1,11 @@
--- Auto Training + Auto Fish (+25) + Auto Secret Cast + Auto Playtime Gift 1-9 (Landscape Split UI + Logo Minimize)
+-- Auto Training + Auto Fish (+25 + FlightTime Sync) + Auto Secret Cast + Auto Playtime + Auto Sell Unequipped (Landscape UI + Logo A)
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
 local HttpService = game:GetService("HttpService")
 local lp = Players.LocalPlayer
 local env = (getgenv and getgenv()) or _G
@@ -56,13 +57,13 @@ local function round(o, r)
     c.Parent = o
 end
 
-local FULL_W, FULL_H = 535, 330
+local FULL_W, FULL_H = 540, 330
 local LOGO_SIZE = 44
 local minimized = false
 
 local main = Instance.new("Frame")
 main.Size = UDim2.new(0, FULL_W, 0, FULL_H)
-main.Position = UDim2.new(0, 16, 0.5, -FULL_H / 2)
+main.Position = UDim2.new(0.5, -FULL_W / 2, 0.5, -FULL_H / 2)
 main.BackgroundColor3 = COL_BG
 main.BorderSizePixel = 0
 main.Active = true
@@ -87,7 +88,7 @@ logoBtn.ZIndex = 10
 logoBtn.Parent = main
 round(logoBtn, 12)
 
--- Header Bar (Area geser lebar di bagian atas)
+-- Header Bar
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1, 0, 0, 38)
 header.BackgroundColor3 = Color3.fromRGB(34, 34, 48)
@@ -123,7 +124,7 @@ local closeBtn = topBtn("X", COL_RED, -36, 28)
 local minBtn = topBtn("-", COL_BTN, -70, 28)
 local copyBtn = topBtn("Salin Log", COL_GREEN, -142, 64)
 
--- Drag halus untuk main frame & tombol Logo 'A' (membedakan geser vs klik)
+-- Drag halus untuk main frame & tombol Logo 'A'
 local dragging = false
 local dragStart, startPos, movedDist = nil, nil, 0
 
@@ -191,7 +192,7 @@ tabBar.BackgroundTransparency = 1
 tabBar.Parent = leftPane
 local tabLay = Instance.new("UIListLayout")
 tabLay.FillDirection = Enum.FillDirection.Horizontal
-tabLay.Padding = UDim.new(0, 5)
+tabLay.Padding = UDim.new(0, 4)
 tabLay.Parent = tabBar
 
 local pages, tabBtns = {}, {}
@@ -215,11 +216,11 @@ local function createPage(name)
     pages[name] = { frame = p, order = 0 }
 
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, 75, 1, 0)
+    b.Size = UDim2.new(0, 60, 1, 0)
     b.BackgroundColor3 = COL_BTN
     b.TextColor3 = Color3.new(1, 1, 1)
     b.Font = Enum.Font.GothamBold
-    b.TextSize = 11
+    b.TextSize = 10
     b.Text = name
     b.Parent = tabBar
     round(b, 6)
@@ -327,15 +328,17 @@ logScroll.Size = UDim2.new(1, -10, 1, -26)
 logScroll.Position = UDim2.new(0, 5, 0, 22)
 logScroll.BackgroundTransparency = 1
 logScroll.BorderSizePixel = 0
-logScroll.ScrollBarThickness = 4
+logScroll.Active = true
+logScroll.ScrollingEnabled = true
+logScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+logScroll.ElasticBehavior = Enum.ElasticBehavior.Always
+logScroll.ScrollBarThickness = 5
 logScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-logScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 logScroll.Parent = rightPane
 
 local logBox = Instance.new("TextLabel")
-logBox.Size = UDim2.new(1, -6, 0, 0)
+logBox.Size = UDim2.new(1, -8, 0, 20)
 logBox.Position = UDim2.new(0, 2, 0, 0)
-logBox.AutomaticSize = Enum.AutomaticSize.Y
 logBox.BackgroundTransparency = 1
 logBox.TextColor3 = Color3.fromRGB(215, 220, 230)
 logBox.Font = Enum.Font.Code
@@ -347,16 +350,23 @@ logBox.Text = ""
 logBox.Parent = logScroll
 
 local lines = {}
+local function updateLogCanvas()
+    if not logScroll or not logScroll.Parent then return end
+    local fullText = table.concat(lines, "\n")
+    logBox.Text = fullText
+    local availW = math.max(120, logScroll.AbsoluteWindowSize.X - 10)
+    local bounds = TextService:GetTextSize(fullText, 10, Enum.Font.Code, Vector2.new(availW, 100000))
+    local totalH = bounds.Y + 12
+    logBox.Size = UDim2.new(1, -8, 0, totalH)
+    logScroll.CanvasSize = UDim2.new(0, 0, 0, totalH)
+    local maxScroll = math.max(0, totalH - logScroll.AbsoluteWindowSize.Y)
+    logScroll.CanvasPosition = Vector2.new(0, maxScroll)
+end
+
 local function logLine(s)
     lines[#lines + 1] = tostring(s)
-    if #lines > 120 then table.remove(lines, 1) end
-    logBox.Text = table.concat(lines, "\n")
-    task.spawn(function()
-        task.wait()
-        if logScroll and logScroll.Parent then
-            logScroll.CanvasPosition = Vector2.new(0, math.max(0, logScroll.AbsoluteCanvasSize.Y - logScroll.AbsoluteWindowSize.Y + 20))
-        end
-    end)
+    if #lines > 100 then table.remove(lines, 1) end
+    pcall(updateLogCanvas)
 end
 
 copyBtn.Activated:Connect(function()
@@ -378,20 +388,17 @@ local function setMinimized(min)
         main.Size = UDim2.new(0, LOGO_SIZE, 0, LOGO_SIZE)
     else
         main.Size = UDim2.new(0, FULL_W, 0, FULL_H)
+        task.defer(updateLogCanvas)
     end
 end
 
-minBtn.Activated:Connect(function()
-    setMinimized(true)
-end)
+minBtn.Activated:Connect(function() setMinimized(true) end)
+attachDrag(logoBtn, function() setMinimized(false) end)
 
-attachDrag(logoBtn, function()
-    setMinimized(false)
-end)
-
----------------------------------------------------------------- Isi menu
+---------------------------------------------------------------- Isi menu (5 Tab)
 createPage("Training")
 createPage("Fishing")
+createPage("Sell")
 createPage("Rewards")
 createPage("Config")
 
@@ -412,6 +419,7 @@ mkField("doubleEvery", "DoubleRep (dtk)", "1")
 -- ===== Tab Fishing =====
 usePage("Fishing")
 mkToggle("fish", "Auto Fish (+25 Cycle)", false)
+mkToggle("autoEquipRod", "Auto Equip Pancingan", true)
 mkToggle("hideAnim", "Sembunyikan Bar & Animasi", true)
 mkToggle("perfect", "Kunci +25 (Power = 1)", true)
 mkField("castBeginName", "Remote CastBegin", "CastBegin")
@@ -419,7 +427,7 @@ mkField("castName", "Remote Cast", "Cast")
 mkField("castPower", "Power cast (1 = +25)", "1")
 mkField("castArg2", "Argumen ke-2 Cast", "1")
 mkField("castGap", "Jeda Begin -> Cast", "0.6")
-mkField("castEvery", "Jeda antar siklus", "1.5")
+mkField("castEvery", "Jeda antar siklus", "1.2")
 
 mkLabel("Secret Cast (Auto Stop)")
 mkToggle("autoSecret", "Auto Secret Cast", true)
@@ -432,12 +440,24 @@ mkLabel("Auto Claim / Tarik Pancing")
 mkToggle("autoReel", "Auto ClaimCatch", true)
 mkField("reelName", "Remote Claim", "ClaimCatch")
 mkField("reelArgs", "Argumen Claim", "auto")
-mkField("reelAfter", "Tunggu max claim (dtk)", "6")
+mkField("reelOffset", "Tambahan jeda FlightTime", "0.15")
+mkField("reelAfter", "Fallback tunggu (dtk)", "5")
 mkToggle("sendCastEnd", "Kirim CastEnd setelah claim", true)
 mkToggle("watch", "Pantau event server", false)
-mkField("watchKeys", "Filter event", "fish,bite,reel,catch,cast,claim,end,secret,spin")
+mkField("watchKeys", "Filter event", "fish,bite,reel,catch,cast,claim,end,secret,spin,sell")
 local castTestBtn = mkBtn("Tes 1 siklus penuh (+25)", COL_BLUE)
 local claimNowBtn = mkBtn("Paksa ClaimCatch sekarang", COL_BTN)
+
+-- ===== Tab Sell (Auto Sell Unequipped) =====
+usePage("Sell")
+mkToggle("autoSell", "Auto Sell Tidak Dipakai", false)
+mkToggle("sellSkipEquipped", "Lindungi EQUIPPED (Wajib)", true)
+mkField("sellRemoteName", "Remote Sell", "SellBeast")
+mkField("sellKeepRarity", "Jangan Jual Rarity (koma)", "Secret,Divine")
+mkField("sellEvery", "Jual tiap (detik)", "8")
+local sellNowBtn = mkBtn("Jual Semua Tidak Dipakai Sekarang", COL_BLUE)
+mkLabel("Catatan: Buka menu Sell di game 1x")
+mkLabel("jika daftar item belum termuat.")
 
 -- ===== Tab Rewards =====
 usePage("Rewards")
@@ -524,8 +544,19 @@ task.spawn(function()
     end
 end)
 
----------------------------------------------------------------- Sembunyikan UI & Animasi Pancing
+---------------------------------------------------------------- Sembunyikan Bar Vertikal, GOOD!, & Animasi Pancing
 local hiddenGuis = {}
+local hiddenScreenGuis = {}
+
+local function isCastUiText(t)
+    t = trim(t):lower()
+    if t == "" or t:find("secret", 1, true) then return false end
+    if t:find("tap to cast", 1, true) then return true end
+    if t:match("^%+%d+$") then return true end
+    if t == "good!" or t == "perfect!" or t == "great!" or t == "bad!" or t == "miss!" then return true end
+    return false
+end
+
 local function updateFishingVisuals()
     local pGui = lp:FindFirstChild("PlayerGui")
     if not pGui then return end
@@ -533,22 +564,46 @@ local function updateFishingVisuals()
     if state.hideAnim then
         for _, obj in ipairs(pGui:GetDescendants()) do
             if not obj:IsDescendantOf(gui) then
+                local matched = false
                 if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-                    local t = obj.Text:lower()
-                    if (t:find("tap to cast", 1, true) or t:match("^%+%d+$")) and not t:find("secret", 1, true) then
-                        local root = obj
-                        while root.Parent and root.Parent ~= pGui and not root.Parent:IsA("ScreenGui") do
-                            root = root.Parent
-                        end
-                        if root:IsA("GuiObject") and root.Visible then
-                            hiddenGuis[root] = true
-                            root.Visible = false
-                        end
+                    matched = isCastUiText(obj.Text)
+                elseif obj:IsA("GuiObject") and hit(obj.Name, { "castbar", "powerbar", "fishingbar", "tapcast", "meter", "gauge" }) then
+                    if not hit(obj.Name, { "secret", "health", "hp", "stamina" }) then
+                        matched = true
                     end
-                elseif obj:IsA("GuiObject") and hit(obj.Name, { "castbar", "powerbar", "fishingbar", "tapcast" }) then
-                    if obj.Visible then
-                        hiddenGuis[obj] = true
-                        obj.Visible = false
+                end
+
+                if matched then
+                    local root = obj
+                    while root.Parent and root.Parent ~= pGui and not root.Parent:IsA("ScreenGui") do
+                        local pName = root.Parent.Name:lower()
+                        if hit(pName, { "hud", "main", "top", "bottom", "hotbar", "sidebar" }) then
+                            break
+                        end
+                        root = root.Parent
+                    end
+
+                    if root:IsA("GuiObject") and root.Visible then
+                        hiddenGuis[root] = true
+                        root.Visible = false
+                    end
+
+                    local sGui = obj:FindFirstAncestorWhichIsA("ScreenGui")
+                    if sGui and sGui.Enabled and not hiddenScreenGuis[sGui] then
+                        local hasMainHud = false
+                        for _, child in ipairs(sGui:GetDescendants()) do
+                            if child:IsA("TextLabel") then
+                                local ct = child.Text:lower()
+                                if ct:find("power", 1, true) or ct:find("trade", 1, true) or ct:find("eggs", 1, true) then
+                                    hasMainHud = true
+                                    break
+                                end
+                            end
+                        end
+                        if not hasMainHud then
+                            hiddenScreenGuis[sGui] = true
+                            sGui.Enabled = false
+                        end
                     end
                 end
             end
@@ -570,6 +625,12 @@ local function updateFishingVisuals()
             end
         end
         hiddenGuis = {}
+        for sGui in pairs(hiddenScreenGuis) do
+            if sGui and sGui.Parent then
+                pcall(function() sGui.Enabled = true end)
+            end
+        end
+        hiddenScreenGuis = {}
     end
 end
 
@@ -583,7 +644,7 @@ task.spawn(function()
         if state.hideAnim then
             pcall(updateFishingVisuals)
         end
-        task.wait(0.25)
+        task.wait(0.1)
     end
 end)
 
@@ -680,6 +741,138 @@ local function fire(name, argText, tag)
     return callRemote(name, parseArgs(argText, trim(name)), tag)
 end
 
+---------------------------------------------------------------- Auto Sell Unequipped (Berdasarkan UI Sell & UID Asli)
+local function clickGuiObj(btn)
+    if not btn or not btn:IsA("GuiObject") then return false end
+    local clicked = false
+    if btn:IsA("GuiButton") then
+        if firesignal then
+            pcall(function() firesignal(btn.Activated) clicked = true end)
+            pcall(function() firesignal(btn.MouseButton1Click) clicked = true end)
+        end
+    end
+    if not clicked and VirtualInputManager then
+        local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+        pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
+            task.wait(0.03)
+            VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
+            clicked = true
+        end)
+    end
+    return clicked
+end
+
+local function sellUnequippedItems(manual)
+    local pGui = lp:FindFirstChild("PlayerGui")
+    if not pGui then return end
+
+    local keepKeys = splitKeys(fields.sellKeepRarity.Text)
+    local rName = trim(fields.sellRemoteName.Text)
+    if rName == "" then rName = "SellBeast" end
+
+    local soldCount = 0
+    local skippedEquipped = 0
+    local skippedRarity = 0
+
+    -- Pindai seluruh tombol "Sell $" di UI Sell
+    for _, obj in ipairs(pGui:GetDescendants()) do
+        if not obj:IsDescendantOf(gui) and (obj:IsA("TextButton") or obj:IsA("TextLabel")) then
+            local txt = trim(obj.Text)
+            if txt:match("^Sell%s+%$") then
+                local btn = obj:IsA("GuiButton") and obj or obj:FindFirstAncestorWhichIsA("GuiButton")
+                -- Cari Frame baris induk yang memuat info item (#16, nama, EQUIPPED, tombol Sell)
+                local row = (btn or obj).Parent
+                while row and row ~= pGui and not row:IsA("ScrollingFrame") and not row:IsA("ScreenGui") do
+                    local hasRank = false
+                    for _, c in ipairs(row:GetDescendants()) do
+                        if c:IsA("TextLabel") and trim(c.Text):match("^#%d+$") then
+                            hasRank = true
+                            break
+                        end
+                    end
+                    if hasRank then break end
+                    row = row.Parent
+                end
+
+                if row and row:IsA("GuiObject") and row.Visible then
+                    local isEquipped = false
+                    local isProtectedRarity = false
+                    local foundUid = nil
+
+                    -- Cek atribut atau nama Frame baris jika menyimpan UID asli (mis. "406")
+                    if row.Name:match("^%d+$") then
+                        foundUid = row.Name
+                    end
+                    for _, attrVal in pairs(row:GetAttributes()) do
+                        local sAttr = tostring(attrVal)
+                        if sAttr:match("^%d+$") then
+                            foundUid = sAttr
+                            break
+                        end
+                    end
+
+                    -- Periksa label EQUIPPED & Rarity di dalam baris tersebut
+                    for _, c in ipairs(row:GetDescendants()) do
+                        if c:IsA("TextLabel") and c.Visible then
+                            local ct = trim(c.Text):lower()
+                            if ct == "equipped" or ct:find("equipped", 1, true) then
+                                isEquipped = true
+                            end
+                            if #keepKeys > 0 and hit(ct, keepKeys) then
+                                isProtectedRarity = true
+                            end
+                        end
+                    end
+
+                    if state.sellSkipEquipped and isEquipped then
+                        skippedEquipped = skippedEquipped + 1
+                    elseif isProtectedRarity then
+                        skippedRarity = skippedRarity + 1
+                    else
+                        local soldThis = false
+                        if foundUid then
+                            local okS = callRemote(rName, table.pack(foundUid), "sell", true)
+                            if okS then soldThis = true end
+                        end
+                        if not soldThis and btn and btn.Visible then
+                            if clickGuiObj(btn) then
+                                soldThis = true
+                            end
+                        end
+                        if soldThis then
+                            soldCount = soldCount + 1
+                            task.wait(0.08)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if manual or soldCount > 0 then
+        logLine(string.format("[sell] terjual=%d | aman(equipped)=%d | aman(rarity)=%d", soldCount, skippedEquipped, skippedRarity))
+    end
+end
+
+sellNowBtn.Activated:Connect(function()
+    task.spawn(function() sellUnequippedItems(true) end)
+end)
+
+task.spawn(function()
+    task.wait(3)
+    while alive do
+        if state.autoSell then
+            pcall(function() sellUnequippedItems(false) end)
+        end
+        local every = math.max(2, tonumber(fields.sellEvery.Text) or 8)
+        local t0 = os.clock()
+        while alive and os.clock() - t0 < every do
+            task.wait(0.5)
+        end
+    end
+end)
+
 ---------------------------------------------------------------- Auto Claim Playtime Reward: Claim("Gift", 1..9)
 local function claimAllPlaytime(manual)
     local rName = trim(fields.ptRemoteName.Text)
@@ -730,27 +923,6 @@ task.spawn(function()
 end)
 
 ---------------------------------------------------------------- Auto Secret Cast
-local function clickGuiObj(btn)
-    if not btn or not btn:IsA("GuiObject") then return false end
-    local clicked = false
-    if btn:IsA("GuiButton") then
-        if firesignal then
-            pcall(function() firesignal(btn.Activated) clicked = true end)
-            pcall(function() firesignal(btn.MouseButton1Click) clicked = true end)
-        end
-    end
-    if not clicked and VirtualInputManager then
-        local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
-            task.wait(0.03)
-            VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
-            clicked = true
-        end)
-    end
-    return clicked
-end
-
 local lastSecretClick = 0
 task.spawn(function()
     while alive do
@@ -809,18 +981,18 @@ task.spawn(function()
     end
 end)
 
----------------------------------------------------------------- Rekam (Dual-Hook) & Scan remote
+---------------------------------------------------------------- Serializer Lengkap (Detail Log)
 local function ser(v, depth)
     depth = depth or 0
     local t = typeof(v)
     if t == "string" then return '"' .. v .. '"' end
     if t == "Instance" then return v:GetFullName() end
     if t == "table" then
-        if depth > 1 then return "{...}" end
+        if depth > 2 then return "{...}" end
         local parts, c = {}, 0
         for k, x in pairs(v) do
             c = c + 1
-            if c > 6 then parts[#parts + 1] = "..." break end
+            if c > 12 then parts[#parts + 1] = "..." break end
             parts[#parts + 1] = tostring(k) .. "=" .. ser(x, depth + 1)
         end
         return "{" .. table.concat(parts, ", ") .. "}"
@@ -962,8 +1134,31 @@ task.spawn(function()
     end
 end)
 
----------------------------------------------------------------- Auto fish (+25 Full Cycle + Anti-Nil Cooldown)
+---------------------------------------------------------------- Auto fish (+25 + FlightTime Sync + Auto-Equip Rod)
 local castCount = 0
+
+local function ensureRodEquipped()
+    if not state.autoEquipRod then return true end
+    local char = lp.Character
+    if not char then return false end
+    local currentTool = char:FindFirstChildOfClass("Tool")
+    if currentTool then return true end
+
+    local bp = lp:FindFirstChild("Backpack")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if bp and hum then
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") then
+                hum:EquipTool(tool)
+                logLine("[fish] equip: " .. tool.Name)
+                task.wait(0.25)
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function getCastPower()
     if state.perfect then
         return tonumber(fields.castPower.Text) or 1
@@ -983,6 +1178,7 @@ end
 
 local function castCycleOnce()
     castCount = castCount + 1
+    ensureRodEquipped()
 
     local okB, resB = callRemote(fields.castBeginName.Text, table.pack(), "fish")
     if not okB then return false end
@@ -998,25 +1194,32 @@ local function castCycleOnce()
 
     local okC, resC = callRemote(fields.castName.Text, args, "fish")
     local info = (type(resC) == "table" and resC) or (type(resB) == "table" and resB) or nil
-    logLine(string.format("[fish] #%d pwr=%s res=%s", castCount, tostring(power), ser(resC)))
+
+    logLine(string.format("[fish] #%d pwr=%s ok=%s hasil=%s", castCount, tostring(power), tostring(okC), ser(info)))
 
     if okC and type(info) == "table" then
-        local waitSec = tonumber(fields.reelAfter.Text) or 6
-        if type(info.ReadyAt) == "number" then
+        local waitSec = tonumber(fields.reelAfter.Text) or 5
+        local offset = tonumber(fields.reelOffset.Text) or 0.15
+
+        if type(info.FlightTime) == "number" and info.FlightTime > 0 then
+            waitSec = info.FlightTime + offset
+        elseif type(info.ReadyAt) == "number" then
             local diff = info.ReadyAt - os.time()
             if diff > 0 and diff < 30 then
-                waitSec = diff + 0.35
+                waitSec = diff + offset
             end
         end
-        logLine(string.format("[fish] +25=%s | tunggu %.1f dtk", tostring(info.Bonus), waitSec))
-        task.wait(math.max(0.5, waitSec))
+
+        local tagSecret = info.Secret and " [SECRET!]" or ""
+        logLine(string.format("[fish]%s %s | Bonus=%s | tunggu %.2f dtk...", tagSecret, tostring(info.Rarity or ""), tostring(info.Bonus), waitSec))
+        task.wait(math.max(0.3, waitSec))
         doClaimAndEnd()
-        task.wait(0.8)
+        task.wait(0.6)
         return true
     end
 
     if okC and info == nil then
-        logLine("[fish] cooldown (nil) -> tunggu 2 dtk...")
+        logLine("[fish] hasil nil -> reset status & tunggu 2 dtk...")
         if state.sendCastEnd then
             callRemote("CastEnd", table.pack(), "end")
         end
@@ -1035,7 +1238,7 @@ task.spawn(function()
                 logLine("[fish] error: " .. tostring(err))
                 task.wait(2)
             end
-            local every = math.max(0.5, tonumber(fields.castEvery.Text) or 1.5)
+            local every = math.max(0.5, tonumber(fields.castEvery.Text) or 1.2)
             local t0 = os.clock()
             while alive and state.fish and os.clock() - t0 < every do task.wait(0.2) end
         else
@@ -1073,7 +1276,7 @@ local function hookEvent(ev)
             if #keys > 0 and not hit(ev.Name, keys) then return end
             local a = table.pack(...)
             local parts = {}
-            for i = 1, math.min(a.n, 4) do parts[i] = ser(a[i]) end
+            for i = 1, math.min(a.n, 6) do parts[i] = ser(a[i]) end
             logLine(string.format("[event] %s(%s)", ev.Name, table.concat(parts, ", ")))
         end)
     end)
