@@ -1,4 +1,4 @@
--- Auto Training + Auto Fish (+25 + FlightTime Sync) + Auto Secret Cast + Auto Playtime + Auto Sell Unequipped (Landscape UI + Logo A)
+-- Auto Training + Auto Fish (+25 + Boost Event Switch + Auto Reset Camera/Tap2x) + Auto Secret + Auto Playtime + Auto Sell Unequipped
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
@@ -124,7 +124,7 @@ local closeBtn = topBtn("X", COL_RED, -36, 28)
 local minBtn = topBtn("-", COL_BTN, -70, 28)
 local copyBtn = topBtn("Salin Log", COL_GREEN, -142, 64)
 
--- Drag halus untuk main frame & tombol Logo 'A'
+-- Drag halus
 local dragging = false
 local dragStart, startPos, movedDist = nil, nil, 0
 
@@ -159,7 +159,7 @@ end))
 
 attachDrag(header, nil)
 
--- Kontainer Kiri (Tab + Menu) & Kontainer Kanan (Log)
+-- Kontainer Kiri & Kanan
 local leftPane = Instance.new("Frame")
 leftPane.Size = UDim2.new(0, 315, 1, -46)
 leftPane.Position = UDim2.new(0, 8, 0, 42)
@@ -405,6 +405,11 @@ createPage("Config")
 -- ===== Tab Training =====
 usePage("Training")
 mkToggle("train", "Auto Training", false)
+mkToggle("trainGoZone", "Auto Menuju Training", true)
+mkToggle("trainTeleport", "Gunakan Teleport (OFF=Jalan)", false)
+local saveTrainPosBtn = mkBtn("Simpan Posisi Training (Relatif Base)", COL_BLUE)
+local goTrainNowBtn = mkBtn("Pergi ke Training Sekarang", COL_BTN)
+mkField("trainRelPos", "Offset Base Training (X,Y,Z)", "")
 mkToggle("double", "Auto DoubleRep", false)
 mkToggle("stopOnOff", "Kirim Stop saat OFF", true)
 mkField("startName", "Remote Start", "StartTraining")
@@ -419,6 +424,14 @@ mkField("doubleEvery", "DoubleRep (dtk)", "1")
 -- ===== Tab Fishing =====
 usePage("Fishing")
 mkToggle("fish", "Auto Fish (+25 Cycle)", false)
+mkLabel("Auto Fish Saat Boost Event")
+mkToggle("boostFish", "Auto Fish Saat Boost Event", false)
+mkField("boostFilter", "Filter Event (kosong=semua)", "")
+mkToggle("fishGoSpot", "Auto ke Dermaga Garis Pink", true)
+mkToggle("fishTeleport", "Gunakan Teleport (OFF=Jalan)", false)
+local saveFishPosBtn = mkBtn("Simpan Posisi Fish (Relatif Base)", COL_BLUE)
+local goFishNowBtn = mkBtn("Pergi ke Dermaga Fish Sekarang", COL_BTN)
+mkField("fishRelPos", "Offset Base Fish (X,Y,Z)", "")
 mkToggle("autoEquipRod", "Auto Equip Pancingan", true)
 mkToggle("hideAnim", "Sembunyikan Bar & Animasi", true)
 mkToggle("perfect", "Kunci +25 (Power = 1)", true)
@@ -448,7 +461,7 @@ mkField("watchKeys", "Filter event", "fish,bite,reel,catch,cast,claim,end,secret
 local castTestBtn = mkBtn("Tes 1 siklus penuh (+25)", COL_BLUE)
 local claimNowBtn = mkBtn("Paksa ClaimCatch sekarang", COL_BTN)
 
--- ===== Tab Sell (Auto Sell Unequipped) =====
+-- ===== Tab Sell =====
 usePage("Sell")
 mkToggle("autoSell", "Auto Sell Tidak Dipakai", false)
 mkToggle("sellSkipEquipped", "Lindungi EQUIPPED (Wajib)", true)
@@ -456,8 +469,6 @@ mkField("sellRemoteName", "Remote Sell", "SellBeast")
 mkField("sellKeepRarity", "Jangan Jual Rarity (koma)", "Secret,Divine")
 mkField("sellEvery", "Jual tiap (detik)", "8")
 local sellNowBtn = mkBtn("Jual Semua Tidak Dipakai Sekarang", COL_BLUE)
-mkLabel("Catatan: Buka menu Sell di game 1x")
-mkLabel("jika daftar item belum termuat.")
 
 -- ===== Tab Rewards =====
 usePage("Rewards")
@@ -487,6 +498,292 @@ local function showTab(name)
     end
 end
 showTab("Fishing")
+
+---------------------------------------------------------------- Deteksi Boost Event di PlayerGui.HUD.Hud.Top.Boosts
+local function getBoostsFolder()
+    local pGui = lp:FindFirstChild("PlayerGui")
+    if not pGui then return nil end
+    local hud = pGui:FindFirstChild("HUD")
+    if hud then
+        local innerHud = hud:FindFirstChild("Hud") or hud
+        local top = innerHud:FindFirstChild("Top")
+        if top then
+            local boosts = top:FindFirstChild("Boosts")
+            if boosts then return boosts end
+        end
+    end
+    return pGui:FindFirstChild("Boosts", true)
+end
+
+local function getActiveBoostEvent()
+    local boosts = getBoostsFolder()
+    if not boosts then return false, nil, nil end
+
+    local filterKeys = splitKeys(fields.boostFilter.Text)
+    for _, child in ipairs(boosts:GetChildren()) do
+        if child:IsA("GuiObject") and child.Visible then
+            local nm = child.Name
+            local nmLow = nm:lower()
+            if not nmLow:find("soon", 1, true) then
+                if #filterKeys == 0 or hit(nmLow, filterKeys) then
+                    local timeLbl = child:FindFirstChild("Time", true)
+                    local timeTxt = (timeLbl and timeLbl:IsA("TextLabel")) and trim(timeLbl.Text) or ""
+                    if timeLbl == nil or timeLbl.Visible then
+                        if timeTxt ~= "0:00" and timeTxt ~= "00:00" then
+                            return true, nm, timeTxt
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false, nil, nil
+end
+
+---------------------------------------------------------------- Sistem Koordinat Relatif Terhadap Spawn Base Sendiri
+local mySpawnCFrame = nil
+
+local function detectMyBaseAnchor(referencePos)
+    if lp.RespawnLocation and lp.RespawnLocation:IsA("BasePart") then
+        mySpawnCFrame = lp.RespawnLocation.CFrame
+        return mySpawnCFrame
+    end
+
+    local pNameLow = lp.Name:lower()
+    local pDispLow = lp.DisplayName:lower()
+    local pIdStr = tostring(lp.UserId)
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("StringValue") or obj:IsA("ObjectValue") or obj:IsA("IntValue") or obj:IsA("NumberValue") then
+            local vStr = tostring(obj.Value):lower()
+            if vStr == pNameLow or vStr == pDispLow or vStr == pIdStr or obj.Value == lp then
+                local container = obj.Parent
+                if container then
+                    local sp = container:FindFirstChildWhichIsA("SpawnLocation", true)
+                        or container:FindFirstChild("Base", true)
+                        or container:FindFirstChild("Spawn", true)
+                        or container:FindFirstChild("Floor", true)
+                    if sp and sp:IsA("BasePart") then
+                        mySpawnCFrame = sp.CFrame
+                        return mySpawnCFrame
+                    end
+                end
+            end
+        end
+    end
+
+    local ref = referencePos or (lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") and lp.Character.HumanoidRootPart.Position)
+    if ref then
+        local closestSpawn, bestDist = nil, math.huge
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("SpawnLocation") then
+                local d = (obj.Position - ref).Magnitude
+                if d < bestDist then
+                    bestDist = d
+                    closestSpawn = obj
+                end
+            end
+        end
+        if closestSpawn then
+            mySpawnCFrame = closestSpawn.CFrame
+            return mySpawnCFrame
+        end
+    end
+
+    return mySpawnCFrame
+end
+
+table.insert(conns, lp.CharacterAdded:Connect(function(char)
+    local hrp = char:WaitForChild("HumanoidRootPart", 5)
+    if hrp then
+        task.wait(0.25)
+        detectMyBaseAnchor(hrp.Position)
+    end
+end))
+
+local function encodeRelativeCFrame(hrp)
+    local baseCF = detectMyBaseAnchor(hrp.Position)
+    if not baseCF then return nil end
+    local rel = baseCF:ToObjectSpace(hrp.CFrame)
+    local _, yaw, _ = rel:ToOrientation()
+    return string.format("%.2f, %.2f, %.2f, %.3f", rel.Position.X, rel.Position.Y, rel.Position.Z, yaw)
+end
+
+local function decodeRelativeToWorld(str)
+    str = trim(str)
+    if str == "" then return nil, nil end
+    local nums = {}
+    for n in str:gmatch("%-?%d+%.?%d*") do
+        nums[#nums + 1] = tonumber(n)
+    end
+    if #nums < 3 then return nil, nil end
+
+    local baseCF = detectMyBaseAnchor()
+    if not baseCF then return nil, nil end
+
+    local localOffset = Vector3.new(nums[1], nums[2], nums[3])
+    local localYaw = nums[4] or 0
+    local worldCF = baseCF:ToWorldSpace(CFrame.new(localOffset) * CFrame.Angles(0, localYaw, 0))
+    local _, worldYaw, _ = worldCF:ToOrientation()
+    return worldCF.Position, worldYaw
+end
+
+local function getTrainingTarget()
+    local pos, yaw = decodeRelativeToWorld(fields.trainRelPos.Text)
+    if pos then return pos, yaw end
+
+    local baseCF = detectMyBaseAnchor()
+    if baseCF then
+        local bestPos, bestDist = nil, 150
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local nm = obj.Name:lower()
+                local pNm = obj.Parent and obj.Parent.Name:lower() or ""
+                if hit(nm, { "train", "gym", "workout", "rep", "powerzone", "lift" }) or hit(pNm, { "train", "gym", "workout" }) then
+                    if obj.Size.X >= 4 and obj.Size.Z >= 4 then
+                        local d = (obj.Position - baseCF.Position).Magnitude
+                        if d < bestDist then
+                            bestDist = d
+                            bestPos = obj.Position + Vector3.new(0, (obj.Size.Y * 0.5) + 3, 0)
+                        end
+                    end
+                end
+            end
+        end
+        if bestPos then return bestPos, nil end
+    end
+    return nil, nil
+end
+
+local function getFishingTarget()
+    local pos, yaw = decodeRelativeToWorld(fields.fishRelPos.Text)
+    if pos then return pos, yaw, nil end
+
+    local baseCF = detectMyBaseAnchor()
+    local refPos = baseCF and baseCF.Position or (lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") and lp.Character.HumanoidRootPart.Position) or Vector3.zero
+
+    local waterPart, bestWaterDist = nil, math.huge
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local nm = obj.Name:lower()
+            if (nm == "water" or nm:find("canal", 1, true) or nm:find("river", 1, true) or nm:find("fishwater", 1, true)) and obj.Size.Z > 30 then
+                local d = (obj.Position - refPos).Magnitude
+                if d < bestWaterDist then
+                    bestWaterDist = d
+                    waterPart = obj
+                end
+            end
+        end
+    end
+
+    if waterPart then
+        local edgeZ = waterPart.Position.Z - (waterPart.Size.Z * 0.5) - 4
+        local standPos = Vector3.new(refPos.X, waterPart.Position.Y + (waterPart.Size.Y * 0.5) + 3, edgeZ)
+        local lookAt = Vector3.new(refPos.X, standPos.Y, waterPart.Position.Z)
+        return standPos, nil, lookAt
+    end
+
+    return nil, nil, nil
+end
+
+local function moveToTarget(targetPos, targetYaw, lookAtPos, useTeleport, tag)
+    if not targetPos then
+        logLine("[" .. tag .. "] posisi belum diset! Berdiri di titik target lalu tekan Simpan Posisi.")
+        return false
+    end
+    local char = lp.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return false end
+
+    local dist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
+    if dist <= 3.5 then
+        if lookAtPos then
+            hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(lookAtPos.X, hrp.Position.Y, lookAtPos.Z))
+        elseif targetYaw then
+            hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
+        end
+        return true
+    end
+
+    if useTeleport then
+        local cf
+        if lookAtPos then
+            cf = CFrame.lookAt(targetPos, Vector3.new(lookAtPos.X, targetPos.Y, lookAtPos.Z))
+        elseif targetYaw then
+            cf = CFrame.new(targetPos) * CFrame.Angles(0, targetYaw, 0)
+        else
+            cf = CFrame.new(targetPos)
+        end
+        hrp.CFrame = cf
+        logLine(string.format("[%s] teleport relatif ke (%.1f, %.1f, %.1f)", tag, targetPos.X, targetPos.Y, targetPos.Z))
+        task.wait(0.25)
+        return true
+    else
+        logLine(string.format("[%s] berjalan ke target (jarak %.1f stud)...", tag, dist))
+        hum:MoveTo(targetPos)
+        local t0 = os.clock()
+        while alive and os.clock() - t0 < 12 do
+            if not hrp or not hrp.Parent then break end
+            local d = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
+            if d <= 3.5 then break end
+            if math.floor((os.clock() - t0) * 10) % 15 == 0 then
+                hum:MoveTo(targetPos)
+            end
+            task.wait(0.1)
+        end
+        if hrp and hrp.Parent then
+            if lookAtPos then
+                hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(lookAtPos.X, hrp.Position.Y, lookAtPos.Z))
+            elseif targetYaw then
+                hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
+            end
+        end
+        return true
+    end
+end
+
+saveTrainPosBtn.Activated:Connect(function()
+    local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local encoded = encodeRelativeCFrame(hrp)
+        if encoded then
+            fields.trainRelPos.Text = encoded
+            dirty = true
+            logLine("[train] offset relatif base tersimpan: " .. encoded)
+        else
+            logLine("[train] gagal mendeteksi Spawn Base!")
+        end
+    end
+end)
+
+goTrainNowBtn.Activated:Connect(function()
+    task.spawn(function()
+        local pos, yaw = getTrainingTarget()
+        moveToTarget(pos, yaw, nil, state.trainTeleport, "train")
+    end)
+end)
+
+saveFishPosBtn.Activated:Connect(function()
+    local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local encoded = encodeRelativeCFrame(hrp)
+        if encoded then
+            fields.fishRelPos.Text = encoded
+            dirty = true
+            logLine("[fish] offset relatif base tersimpan: " .. encoded)
+        else
+            logLine("[fish] gagal mendeteksi Spawn Base!")
+        end
+    end
+end)
+
+goFishNowBtn.Activated:Connect(function()
+    task.spawn(function()
+        local pos, yaw, lookAt = getFishingTarget()
+        moveToTarget(pos, yaw, lookAt, state.fishTeleport, "fish")
+    end)
+end)
 
 ---------------------------------------------------------------- Config
 local function canFile() return writefile ~= nil and readfile ~= nil and isfile ~= nil end
@@ -741,7 +1038,57 @@ local function fire(name, argText, tag)
     return callRemote(name, parseArgs(argText, trim(name)), tag)
 end
 
----------------------------------------------------------------- Auto Sell Unequipped (Berdasarkan UI Sell & UID Asli)
+---------------------------------------------------------------- Reset Kamera & Auto Tap 2x di Ruang Kosong Saat Keluar Fishing
+local function tapEmptySpace(times)
+    times = times or 2
+    local cam = workspace.CurrentCamera
+    local vp = cam and cam.ViewportSize or Vector2.new(800, 450)
+    -- Titik ruang kosong di kuadran kanan atas layar (aman dari tombol HUD/menu)
+    local tapX = vp.X * 0.72
+    local tapY = vp.Y * 0.28
+
+    for _ = 1, times do
+        if VirtualInputManager then
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(tapX, tapY, 0, true, game, 1)
+                task.wait(0.04)
+                VirtualInputManager:SendMouseButtonEvent(tapX, tapY, 0, false, game, 1)
+            end)
+        elseif VirtualUser then
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton1(Vector2.new(tapX, tapY))
+            end)
+        end
+        task.wait(0.14)
+    end
+end
+
+local function exitFishingVisualState()
+    -- 1. Hentikan status lemparan pancing di server & lepas alat pancing
+    callRemote("CastEnd", table.pack(), "end", true)
+    local char = lp.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum:UnequipTools() end)
+    end
+
+    -- 2. Kembalikan kamera dari kamera kanal fishing ke kamera karakter normal
+    local cam = workspace.CurrentCamera
+    if cam and hum then
+        pcall(function()
+            cam.CameraSubject = hum
+            cam.CameraType = Enum.CameraType.Custom
+        end)
+    end
+
+    -- 3. Tap 2x di ruang kosong layar untuk memicu client game keluar dari mode UI/kamera fishing
+    task.wait(0.15)
+    tapEmptySpace(2)
+    logLine("[visual] reset kamera fishing + tap 2x selesai")
+end
+
+---------------------------------------------------------------- Auto Sell Unequipped
 local function clickGuiObj(btn)
     if not btn or not btn:IsA("GuiObject") then return false end
     local clicked = false
@@ -775,13 +1122,11 @@ local function sellUnequippedItems(manual)
     local skippedEquipped = 0
     local skippedRarity = 0
 
-    -- Pindai seluruh tombol "Sell $" di UI Sell
     for _, obj in ipairs(pGui:GetDescendants()) do
         if not obj:IsDescendantOf(gui) and (obj:IsA("TextButton") or obj:IsA("TextLabel")) then
             local txt = trim(obj.Text)
             if txt:match("^Sell%s+%$") then
                 local btn = obj:IsA("GuiButton") and obj or obj:FindFirstAncestorWhichIsA("GuiButton")
-                -- Cari Frame baris induk yang memuat info item (#16, nama, EQUIPPED, tombol Sell)
                 local row = (btn or obj).Parent
                 while row and row ~= pGui and not row:IsA("ScrollingFrame") and not row:IsA("ScreenGui") do
                     local hasRank = false
@@ -800,7 +1145,6 @@ local function sellUnequippedItems(manual)
                     local isProtectedRarity = false
                     local foundUid = nil
 
-                    -- Cek atribut atau nama Frame baris jika menyimpan UID asli (mis. "406")
                     if row.Name:match("^%d+$") then
                         foundUid = row.Name
                     end
@@ -812,7 +1156,6 @@ local function sellUnequippedItems(manual)
                         end
                     end
 
-                    -- Periksa label EQUIPPED & Rarity di dalam baris tersebut
                     for _, c in ipairs(row:GetDescendants()) do
                         if c:IsA("TextLabel") and c.Visible then
                             local ct = trim(c.Text):lower()
@@ -981,7 +1324,7 @@ task.spawn(function()
     end
 end)
 
----------------------------------------------------------------- Serializer Lengkap (Detail Log)
+---------------------------------------------------------------- Serializer Lengkap
 local function ser(v, depth)
     depth = depth or 0
     local t = typeof(v)
@@ -1105,13 +1448,70 @@ scanBtn.Activated:Connect(function()
     end)
 end)
 
----------------------------------------------------------------- Auto training
+---------------------------------------------------------------- Koordinator Boost Event <-> Auto Training / Auto Fish
+local boostEventActive = false
+local lastLoggedEventName = nil
+
+task.spawn(function()
+    while alive do
+        if state.boostFish then
+            local active, evName, timeTxt = getActiveBoostEvent()
+            if active and not boostEventActive then
+                boostEventActive = true
+                lastLoggedEventName = evName
+                logLine(string.format("[event] BOOST AKTIF: %s (%s) -> beralih ke Auto Fish!", tostring(evName), tostring(timeTxt)))
+            elseif not active and boostEventActive then
+                boostEventActive = false
+                logLine(string.format("[event] BOOST SELESAI: %s -> keluar mode fishing & kembali ke Training!", tostring(lastLoggedEventName or "")))
+                lastLoggedEventName = nil
+                -- Bersihkan kamera & visual mode fishing (CastEnd + Unequip + Camera Custom + Tap 2x)
+                exitFishingVisualState()
+            end
+        else
+            if boostEventActive then
+                boostEventActive = false
+                lastLoggedEventName = nil
+                exitFishingVisualState()
+            end
+        end
+        task.wait(0.4)
+    end
+end)
+
+onToggle.boostFish = function(on)
+    logLine(on and "[event] Auto Fish saat Boost Event: AKTIF" or "[event] Auto Fish saat Boost Event: MATI")
+    if not on and not state.fish then
+        task.spawn(exitFishingVisualState)
+    end
+end
+
+---------------------------------------------------------------- Auto training (Dijeda Otomatis Saat Boost Event Fish Berjalan)
 local wasTraining = false
+onToggle.train = function(on)
+    if on and state.trainGoZone and not (state.boostFish and boostEventActive) then
+        task.spawn(function()
+            local pos, yaw = getTrainingTarget()
+            moveToTarget(pos, yaw, nil, state.trainTeleport, "train")
+        end)
+    end
+end
+
 task.spawn(function()
     local lastStart, lastDouble = -1e9, -1e9
     while alive do
         local now = os.clock()
-        if state.train then
+        local shouldRunTrain = state.train and not (state.boostFish and boostEventActive)
+
+        if shouldRunTrain then
+            if not wasTraining then
+                -- Pastikan visual fishing sudah bersih saat memulai ulang Training
+                exitFishingVisualState()
+                if state.trainGoZone then
+                    local pos, yaw = getTrainingTarget()
+                    moveToTarget(pos, yaw, nil, state.trainTeleport, "train")
+                end
+                logLine("[train] berjalan...")
+            end
             wasTraining = true
             local every = math.max(0.5, tonumber(fields.startEvery.Text) or 5)
             if now - lastStart >= every then
@@ -1128,14 +1528,18 @@ task.spawn(function()
         elseif wasTraining then
             wasTraining = false
             if state.stopOnOff then fire(fields.stopName.Text, fields.stopArgs.Text, "stop") end
-            logLine("[train] dihentikan")
+            logLine(state.train and "[train] dijeda sementara (event fish aktif)" or "[train] dihentikan")
         end
         task.wait(0.25)
     end
 end)
 
----------------------------------------------------------------- Auto fish (+25 + FlightTime Sync + Auto-Equip Rod)
+---------------------------------------------------------------- Auto fish (Manual ON atau Otomatis Saat Boost Event)
 local castCount = 0
+
+local function shouldFishNow()
+    return alive and (state.fish or (state.boostFish and boostEventActive))
+end
 
 local function ensureRodEquipped()
     if not state.autoEquipRod then return true end
@@ -1177,14 +1581,23 @@ local function doClaimAndEnd()
 end
 
 local function castCycleOnce()
+    if not shouldFishNow() then return false end
+
+    if state.fishGoSpot then
+        local pos, yaw, lookAt = getFishingTarget()
+        moveToTarget(pos, yaw, lookAt, state.fishTeleport, "fish")
+    end
+    if not shouldFishNow() then return false end
+
     castCount = castCount + 1
     ensureRodEquipped()
 
     local okB, resB = callRemote(fields.castBeginName.Text, table.pack(), "fish")
-    if not okB then return false end
+    if not okB or not shouldFishNow() then return false end
 
     local gap = math.max(0.2, tonumber(fields.castGap.Text) or 0.6)
     task.wait(gap)
+    if not shouldFishNow() then return false end
 
     local power = getCastPower()
     local a2 = parseArgs(fields.castArg2.Text, "")
@@ -1212,7 +1625,18 @@ local function castCycleOnce()
 
         local tagSecret = info.Secret and " [SECRET!]" or ""
         logLine(string.format("[fish]%s %s | Bonus=%s | tunggu %.2f dtk...", tagSecret, tostring(info.Rarity or ""), tostring(info.Bonus), waitSec))
-        task.wait(math.max(0.3, waitSec))
+
+        -- Tunggu bertahap agar bisa langsung dibatalkan jika boost event selesai di tengah jalan
+        local tWait = os.clock()
+        local targetWait = math.max(0.3, waitSec)
+        while alive and (os.clock() - tWait) < targetWait do
+            if not shouldFishNow() then
+                callRemote("CastEnd", table.pack(), "end", true)
+                return false
+            end
+            task.wait(0.1)
+        end
+
         doClaimAndEnd()
         task.wait(0.6)
         return true
@@ -1232,7 +1656,7 @@ end
 
 task.spawn(function()
     while alive do
-        if state.fish then
+        if shouldFishNow() then
             local ok, err = pcall(castCycleOnce)
             if not ok then
                 logLine("[fish] error: " .. tostring(err))
@@ -1240,7 +1664,9 @@ task.spawn(function()
             end
             local every = math.max(0.5, tonumber(fields.castEvery.Text) or 1.2)
             local t0 = os.clock()
-            while alive and state.fish and os.clock() - t0 < every do task.wait(0.2) end
+            while shouldFishNow() and os.clock() - t0 < every do
+                task.wait(0.2)
+            end
         else
             task.wait(0.3)
         end
@@ -1259,7 +1685,10 @@ claimNowBtn.Activated:Connect(function()
 end)
 
 onToggle.fish = function(on)
-    logLine(on and "[fish] siklus +25 dimulai" or "[fish] dihentikan")
+    logLine(on and "[fish] menuju dermaga & mulai siklus +25" or "[fish] dihentikan")
+    if not on and not (state.boostFish and boostEventActive) then
+        task.spawn(exitFishingVisualState)
+    end
 end
 
 ---------------------------------------------------------------- Pantau event server
@@ -1317,6 +1746,9 @@ end
 closeBtn.Activated:Connect(cleanup)
 env.AutoTrainingCleanup = cleanup
 
+-- Deteksi awal jangkar Spawn Base
+detectMyBaseAnchor()
+
 -- Muat config otomatis jika tersedia
 local saved = readConfig()
 if saved then
@@ -1327,7 +1759,6 @@ if saved then
     end
 end
 
--- Normalisasi huruf kapital 'Claim' & 'Gift' jika tersimpan huruf kecil
 if trim(fields.ptRemoteName.Text):lower() == "auto" or trim(fields.ptRemoteName.Text):lower() == "claim" then
     fields.ptRemoteName.Text = "Claim"
 end
@@ -1335,4 +1766,4 @@ if trim(fields.ptCategory.Text) == "" then
     fields.ptCategory.Text = "Gift"
 end
 
-logLine("Siap! Tap '-' untuk minimize ke logo A.")
+logLine("Siap! Auto reset kamera + tap 2x aktif saat boost selesai.")
